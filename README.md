@@ -1,13 +1,13 @@
-bdiff
+differ
 =====
 
 #Hash-based remote diff library
 
-This is a simple proof of concept libary for remote delta/diff creation similar in function to rdiff and librsync. It does not use a sliding window like librsync but rather fixed size blocks. I needed a library that was cross platform, unencumbered by the GPL and replicated, albeit not as efficiently, the functioanlity of librsync.
+This is a simple proof of concept library for remote delta/diff creation similar in function to rdiff and librsync. It does not use a sliding window like librsync but rather fixed size blocks. I needed a library that was cross platform, unencumbered by the GPL and replicated, albeit not as efficiently, the functionality of librsync.
 
-While designing this I found that the algorithmic complexity of librsync wasn't necessary for a couple reasons. If a file is huge (several GB), it is unlikely it will be rewritten so that new data can be inserted in the middle. This is, in my view, a non-problem that librsync solves. If a file is small enough to be rewritten to insert data, uploading it over modern Internet connections without any remote delta trickery (especially using compression) takes relatively little time; time I'm willing to sacrafice for the similicity of using this library.
+While designing this I found that the algorithmic complexity of librsync wasn't necessary for a couple reasons. If a file is huge (several GB), it is unlikely it will be rewritten so that new data can be inserted in the middle. This is, in my view, a non-problem that librsync solves. If a file is small enough to be rewritten to insert data, uploading it over modern Internet connections without any remote delta trickery (especially using compression) takes relatively little time; time I'm willing to sacrifice for the simplicity of using this library.
 
-There are three functions of note in this libary:
+There are three functions of note in this library:
 
 ##signature(basis_file, sig_file, block_size = 32768)
 
