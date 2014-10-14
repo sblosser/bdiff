@@ -1,4 +1,4 @@
-differ
+bdiff
 =====
 
 #Hash-based remote diff library
@@ -9,15 +9,15 @@ While designing this I found that the algorithmic complexity of librsync wasn't 
 
 There are three functions of note in this library:
 
-##signature(basis_file, sig_file, block_size = 32768)
+###signature(basis_file, sig_file, block_size = 32768)
 
 Takes a basis_file, calculates sha256 hashes for each block_size block and writes out sig_file.
 
-##delta(sig_file, new_file, delta_file)
+###delta(sig_file, new_file, delta_file)
 
 Takes a sig_file input and new_file input and writes out a delta_file containing instructions on how to rebuild new_file using the delta_file and original basis_file.
 
-##patch(basis_file, delta_file, new_file)
+###patch(basis_file, delta_file, new_file)
 
 Creates new_file using basis_file and delta_file as inputs.
 
