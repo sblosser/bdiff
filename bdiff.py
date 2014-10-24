@@ -3,6 +3,8 @@
 from hashlib import sha256, md5
 import struct
 
+__VERSION = 2
+
 def __read_blocks(file_object, chunk_size):
     while True:
         data = file_object.read(chunk_size)
@@ -33,7 +35,12 @@ def signature(basis_file, sig_file, block_size = 4096):
     block_size: (Optional) Number of bytes per block. Fixed at this value for
     the rest of the process (delta and patch)
     """
-    # First four bytes of the file is the block size    
+    # Write the identifier string, file type and version number
+    sig_file.write('bdif')
+    sig_file.write('sig')
+    sig_file.write(struct.pack('i', __VERSION))
+    
+    # Next four bytes of the file is the block size    
     sig_file.write(struct.pack('i', block_size))
     
     # Calculate the hash of each block and write it (32 bytes) to sig_file.
@@ -42,85 +49,126 @@ def signature(basis_file, sig_file, block_size = 4096):
         sig_file.write(h.digest())
 
 def delta(sig_file, new_file, delta_file):
-    # Get block_size from sig_file
-    block_size_bytes = sig_file.read(4)
-    block_size = int(struct.unpack('i', block_size_bytes)[0])
+    """Generate a patch file using a signature and new file
     
-    # Save the block size to the delta file
-    delta_file.write(block_size_bytes)    
+    Arguments:
+    sig_file: File object for the signature file
+    new_file: The updated file we are trying to replicate
+    delta_file: File object to which the patch instruction will be written
+    """
+    # Verify the file is for us
+    if not sig_file.read(7) == 'bdifsig':
+        raise Exception('Not a bdiff sig file')
     
-    # Read the signatures into memory
-    signatures = {}
-    block_number = 0
-    for block in __read_blocks(sig_file, 16):
-        signatures[block] = block_number
-        block_number += 1
+    # Get the version number
+    version_bytes = sig_file.read(4)
+    version = int(struct.unpack('i', version_bytes)[0])
     
-    # Read the new_file calculating block hashes and comparing them to
-    # the list from sig_file. Also calculate a whole file hash for error
-    # checking.
-    file_h = sha256()
-    for block in __read_blocks(new_file, block_size):
-        h = md5(block)
-        file_h.update(block)
-        block_hash = h.digest()
-        if block_hash in signatures:
-            # Found the block in the basis_file so write an instruction
-            # to copy that block from the basis_file
-            delta_file.write('C')
-            delta_file.write(struct.pack('i', signatures[block_hash]))
-        elif len(block) == block_size:
-            # Block not found in basis_file so write an instruction
-            # to get the block from delta_file and include the block data
-            delta_file.write('D')
-            delta_file.write(block)
-        else:
-            # Block not found and the block we got is shorter than block_size
-            # so write a different instruction that includes the block length
-            delta_file.write('E')
-            delta_file.write(struct.pack('i', len(block)))
-            delta_file.write(block)
-    
-    # Write the complete file hash to the delta file
-    delta_file.write('H')
-    delta_file.write(file_h.digest())
+    if version == 2:
+        # Get block_size from sig_file
+        block_size_bytes = sig_file.read(4)
+        block_size = int(struct.unpack('i', block_size_bytes)[0])
+        
+        # Write the identifier string, file type and version number
+        delta_file.write('bdif')
+        delta_file.write('dlt')
+        delta_file.write(struct.pack('i', __VERSION))
+        
+        # Save the block size to the delta file
+        delta_file.write(block_size_bytes)    
+        
+        # Read the signatures into memory
+        signatures = {}
+        block_number = 0
+        for block in __read_blocks(sig_file, 16):
+            signatures[block] = block_number
+            block_number += 1
+        
+        # Read the new_file calculating block hashes and comparing them to
+        # the list from sig_file. Also calculate a whole file hash for error
+        # checking.
+        file_h = sha256()
+        for block in __read_blocks(new_file, block_size):
+            h = md5(block)
+            file_h.update(block)
+            block_hash = h.digest()
+            if block_hash in signatures:
+                # Found the block in the basis_file so write an instruction
+                # to copy that block from the basis_file
+                delta_file.write('C')
+                delta_file.write(struct.pack('i', signatures[block_hash]))
+            elif len(block) == block_size:
+                # Block not found in basis_file so write an instruction
+                # to get the block from delta_file and include the block data
+                delta_file.write('D')
+                delta_file.write(block)
+            else:
+                # Block not found and the block we got is shorter than block_size
+                # so write a different instruction that includes the block length
+                delta_file.write('E')
+                delta_file.write(struct.pack('i', len(block)))
+                delta_file.write(block)
+        
+        # Write the complete file hash to the delta file
+        delta_file.write('H')
+        delta_file.write(file_h.digest())
+    else:
+        raise Exception("Unknown signature file version")
             
 def patch(basis_file, delta_file, new_file):
-    # Get block size from delta_file
-    block_size = int(struct.unpack('i', delta_file.read(4))[0])
+    """Patch basis_file using the instructions in delta_file
     
-    file_h = sha256()
-    file_h_target = ''
+    Arguments:
+    basis_file: The original file from which the signature was created
+    delta_file: The file object containing the patch instructions
+    new_file: The final patched file object
+    """
+    # Verify the file is for us
+    if not delta_file.read(7) == 'bdifdlt':
+        raise Exception('Not a bdiff delta file')
     
-    # Read the instructions from the delta_file
-    while True:
-        mode = delta_file.read(1)
-        if not mode:
-            break
-        if mode == 'C':
-            # Copy mode. Get the data from basis_file
-            block_number = int(struct.unpack('i', delta_file.read(4))[0])
-            basis_file.seek(block_number * block_size)
-            data = basis_file.read(block_size)
-        elif mode == 'D':
-            # Delta mode. Get the data from the delta file
-            data = delta_file.read(block_size)
-        elif mode == 'E':
-            # Delta mode but with a short block (EOF)
-            delta_bytes = int(struct.unpack('i', delta_file.read(4))[0])
-            data = delta_file.read(delta_bytes)
-        elif mode == 'H':
-            # Found the complete file hash. new_file should match this.
-            file_h_target = delta_file.read(32)
-            break
-        else:
-            raise Exception("Incorrectly formatted delta file")
+    # Get the version number
+    version_bytes = delta_file.read(4)
+    version = int(struct.unpack('i', version_bytes)[0])
+    
+    if version == 2:
+        # Get block size from delta_file
+        block_size = int(struct.unpack('i', delta_file.read(4))[0])
         
-        new_file.write(data)
-        file_h.update(data)
+        file_h = sha256()
+        file_h_target = ''
         
-    if not file_h.digest() == file_h_target:
-        raise Exception("Hash mismatch in new file")
+        # Read the instructions from the delta_file
+        while True:
+            mode = delta_file.read(1)
+            if not mode:
+                break
+            if mode == 'C':
+                # Copy mode. Get the data from basis_file
+                block_number = int(struct.unpack('i', delta_file.read(4))[0])
+                basis_file.seek(block_number * block_size)
+                data = basis_file.read(block_size)
+            elif mode == 'D':
+                # Delta mode. Get the data from the delta file
+                data = delta_file.read(block_size)
+            elif mode == 'E':
+                # Delta mode but with a short block (EOF)
+                delta_bytes = int(struct.unpack('i', delta_file.read(4))[0])
+                data = delta_file.read(delta_bytes)
+            elif mode == 'H':
+                # Found the complete file hash. new_file should match this.
+                file_h_target = delta_file.read(32)
+                break
+            else:
+                raise Exception("Incorrectly formatted delta file")
+            
+            new_file.write(data)
+            file_h.update(data)
+            
+        if not file_h.digest() == file_h_target:
+            raise Exception("Hash mismatch in new file")
+    else:
+        raise Exception("Unknown delta file version")
 
 
 # This library isn't really meant to be used from the command line except
