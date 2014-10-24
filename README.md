@@ -9,7 +9,7 @@ While designing this I found that the algorithmic complexity of librsync wasn't 
 
 There are three functions of note in this library:
 
-###signature(basis_file, sig_file, block_size = 32768)
+###signature(basis_file, sig_file, block_size)
 
 Takes a basis_file, calculates sha256 hashes for each block_size block and writes out sig_file.
 
