@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from hashlib import sha256
+from hashlib import sha256, md5
 import struct
 
 def __read_blocks(file_object, chunk_size):
@@ -24,13 +24,21 @@ def __read_blocks(file_object, chunk_size):
                 raise Exception("Could not get proper size block")
         yield data
 
-def signature(basis_file, sig_file, block_size = 32768):
+def signature(basis_file, sig_file, block_size = 4096):
+    """Generate a signature from a basis file
+    
+    Arguments:
+    basis_file: The original file that needs to be updated
+    sig_file: File object to output the signature
+    block_size: (Optional) Number of bytes per block. Fixed at this value for
+    the rest of the process (delta and patch)
+    """
     # First four bytes of the file is the block size    
     sig_file.write(struct.pack('i', block_size))
     
     # Calculate the hash of each block and write it (32 bytes) to sig_file.
     for block in __read_blocks(basis_file, block_size):
-        h = sha256(block)
+        h = md5(block)
         sig_file.write(h.digest())
 
 def delta(sig_file, new_file, delta_file):
@@ -44,7 +52,7 @@ def delta(sig_file, new_file, delta_file):
     # Read the signatures into memory
     signatures = {}
     block_number = 0
-    for block in __read_blocks(sig_file, 32):
+    for block in __read_blocks(sig_file, 16):
         signatures[block] = block_number
         block_number += 1
     
@@ -53,7 +61,7 @@ def delta(sig_file, new_file, delta_file):
     # checking.
     file_h = sha256()
     for block in __read_blocks(new_file, block_size):
-        h = sha256(block)
+        h = md5(block)
         file_h.update(block)
         block_hash = h.digest()
         if block_hash in signatures:
