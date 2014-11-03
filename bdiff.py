@@ -26,27 +26,33 @@ def __read_blocks(file_object, chunk_size):
                 raise Exception("Could not get proper size block")
         yield data
 
-def signature(basis_file, sig_file, block_size = 4096):
+def __signature(basis_file, block_size):
+    # Yield the identifier string, file type, version number and block size
+    s_block = ('bdif' + 'sig' +
+               struct.pack('i', __VERSION) +
+               struct.pack('i', block_size)) 
+    yield s_block
+    
+    # Calculate the hash of each block and yield it.
+    for block in __read_blocks(basis_file, block_size):
+        h = md5(block)
+        yield h.digest()
+        
+def signature(basis_file, sig_file = None, block_size = 4096):
     """Generate a signature from a basis file
     
     Arguments:
     basis_file: The original file that needs to be updated
-    sig_file: File object to output the signature
+    sig_file: (Optional) File object to output the signature
     block_size: (Optional) Number of bytes per block. Fixed at this value for
     the rest of the process (delta and patch)
     """
-    # Write the identifier string, file type and version number
-    sig_file.write('bdif')
-    sig_file.write('sig')
-    sig_file.write(struct.pack('i', __VERSION))
-    
-    # Next four bytes of the file is the block size    
-    sig_file.write(struct.pack('i', block_size))
-    
-    # Calculate the hash of each block and write it (32 bytes) to sig_file.
-    for block in __read_blocks(basis_file, block_size):
-        h = md5(block)
-        sig_file.write(h.digest())
+    if sig_file is None:
+        return __signature(basis_file, block_size)
+    else:
+        for block in __signature(basis_file, block_size):
+            sig_file.write(block)
+
 
 def __delta(sig_file, new_file):
     # Verify the file is for us
@@ -119,14 +125,7 @@ def delta(sig_file, new_file, delta_file = None):
             delta_file.write(block)        
 
 
-def patch(basis_file, delta_file, new_file):
-    """Patch basis_file using the instructions in delta_file
-    
-    Arguments:
-    basis_file: The original file from which the signature was created
-    delta_file: The file object containing the patch instructions
-    new_file: The final patched file object
-    """
+def __patch(basis_file, delta_file):
     # Verify the file is for us
     if not delta_file.read(7) == 'bdifdlt':
         raise Exception('Not a bdiff delta file')
@@ -166,7 +165,7 @@ def patch(basis_file, delta_file, new_file):
             else:
                 raise Exception("Incorrectly formatted delta file")
             
-            new_file.write(data)
+            yield data
             file_h.update(data)
             
         if not file_h.digest() == file_h_target:
@@ -174,6 +173,20 @@ def patch(basis_file, delta_file, new_file):
     else:
         raise Exception("Unknown delta file version")
 
+def patch(basis_file, delta_file, new_file = None):
+    """Patch basis_file using the instructions in delta_file
+    
+    Arguments:
+    basis_file: The original file from which the signature was created
+    delta_file: The file object containing the patch instructions
+    new_file: (Optional) The final patched file object
+    """
+    if new_file is None:
+        return __patch(basis_file, delta_file)
+    else:
+        for block in __patch(basis_file, delta_file):
+            new_file.write(block)
+        
 
 # This library isn't really meant to be used from the command line except
 # for some rudimentary testing. Thus, the below code has very little error
