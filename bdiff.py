@@ -48,14 +48,7 @@ def signature(basis_file, sig_file, block_size = 4096):
         h = md5(block)
         sig_file.write(h.digest())
 
-def delta(sig_file, new_file, delta_file):
-    """Generate a patch file using a signature and new file
-    
-    Arguments:
-    sig_file: File object for the signature file
-    new_file: The updated file we are trying to replicate
-    delta_file: File object to which the patch instruction will be written
-    """
+def __delta(sig_file, new_file):
     # Verify the file is for us
     if not sig_file.read(7) == 'bdifsig':
         raise Exception('Not a bdiff sig file')
@@ -69,13 +62,9 @@ def delta(sig_file, new_file, delta_file):
         block_size_bytes = sig_file.read(4)
         block_size = int(struct.unpack('i', block_size_bytes)[0])
         
-        # Write the identifier string, file type and version number
-        delta_file.write('bdif')
-        delta_file.write('dlt')
-        delta_file.write(struct.pack('i', __VERSION))
-        
-        # Save the block size to the delta file
-        delta_file.write(block_size_bytes)    
+        # Write the identifier string, file type, version number and block size
+        d_block = 'bdif' + 'dlt' + struct.pack('i', __VERSION) + block_size_bytes
+        yield d_block
         
         # Read the signatures into memory
         signatures = {}
@@ -95,26 +84,41 @@ def delta(sig_file, new_file, delta_file):
             if block_hash in signatures:
                 # Found the block in the basis_file so write an instruction
                 # to copy that block from the basis_file
-                delta_file.write('C')
-                delta_file.write(struct.pack('i', signatures[block_hash]))
+                d_block = 'C' + struct.pack('i', signatures[block_hash])
+                yield d_block
             elif len(block) == block_size:
                 # Block not found in basis_file so write an instruction
                 # to get the block from delta_file and include the block data
-                delta_file.write('D')
-                delta_file.write(block)
+                d_block = 'D' + block
+                yield d_block
             else:
                 # Block not found and the block we got is shorter than block_size
                 # so write a different instruction that includes the block length
-                delta_file.write('E')
-                delta_file.write(struct.pack('i', len(block)))
-                delta_file.write(block)
+                d_block = 'E' + struct.pack('i', len(block)) + block
+                yield d_block
         
         # Write the complete file hash to the delta file
-        delta_file.write('H')
-        delta_file.write(file_h.digest())
+        d_block = 'H' + file_h.digest()
+        yield d_block
     else:
         raise Exception("Unknown signature file version")
-            
+
+def delta(sig_file, new_file, delta_file = None):
+    """Generate a patch file using a signature and new file
+    
+    Arguments:
+    sig_file: File object for the signature file
+    new_file: The updated file we are trying to replicate
+    delta_file: (optional) File object to which the patch instruction will be
+    written. If omitted, a generator will be returned
+    """
+    if delta_file is None:
+        return __delta(sig_file, new_file)
+    else:
+        for block in __delta(sig_file, new_file):
+            delta_file.write(block)        
+
+
 def patch(basis_file, delta_file, new_file):
     """Patch basis_file using the instructions in delta_file
     
