@@ -5,27 +5,6 @@ import struct
 
 __VERSION = 2
 
-def __read_blocks(file_object, chunk_size):
-    while True:
-        data = file_object.read(chunk_size)
-        if not data:
-            break
-        # If the OS returns a partial block and is not EOF
-        # keep trying for the rest of the block
-        block_tries = 0
-        while len(data) < chunk_size:
-            more_data = file_object.read(chunk_size - len(data))
-            if not more_data:
-                break
-            data = data + more_data
-            
-            # Retry 10 times and raise exception on failure as this
-            # library relies on consistently sized blocks.
-            block_tries += 1
-            if block_tries > 10:
-                raise Exception("Could not get proper size block")
-        yield data
-
 def __signature(basis_file, block_size):
     # Yield the identifier string, file type, version number and block size
     s_block = ('bdif' + 'sig' +
@@ -34,7 +13,7 @@ def __signature(basis_file, block_size):
     yield s_block
     
     # Calculate the hash of each block and yield it.
-    for block in __read_blocks(basis_file, block_size):
+    for block in iter(lambda: basis_file.read(block_size), ''):
         h = md5(block)
         yield h.digest()
         
@@ -55,6 +34,11 @@ def signature(basis_file, sig_file = None, block_size = 4096):
 
 
 def __delta(sig_file, new_file):
+    
+    # Make sure we are at the beginning of both files.
+    sig_file.seek(0)
+    new_file.seek(0)
+    
     # Verify the file is for us
     if not sig_file.read(7) == 'bdifsig':
         raise Exception('Not a bdiff sig file')
@@ -75,7 +59,7 @@ def __delta(sig_file, new_file):
         # Read the signatures into memory
         signatures = {}
         block_number = 0
-        for block in __read_blocks(sig_file, 16):
+        for block in iter(lambda: sig_file.read(16), ''):
             signatures[block] = block_number
             block_number += 1
         
@@ -83,7 +67,7 @@ def __delta(sig_file, new_file):
         # the list from sig_file. Also calculate a whole file hash for error
         # checking.
         file_h = sha256()
-        for block in __read_blocks(new_file, block_size):
+        for block in iter(lambda: new_file.read(block_size), ''):
             h = md5(block)
             file_h.update(block)
             block_hash = h.digest()
@@ -165,8 +149,8 @@ def __patch(basis_file, delta_file):
             else:
                 raise Exception("Incorrectly formatted delta file")
             
-            yield data
             file_h.update(data)
+            yield data
             
         if not file_h.digest() == file_h_target:
             raise Exception("Hash mismatch in new file")
